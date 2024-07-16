@@ -12,6 +12,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from models.db import db, User, Certificate, Role
 
+URL_YANDEX = "https://botapi.messenger.yandex.net/"
+
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///certificates.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -53,51 +55,42 @@ def get_expiring_certificates_within_days(days):
         date_later = datetime.now() + timedelta(days=days)
         return Certificate.query.filter(Certificate.expiration_date <= date_later).all()
 
-
-def send_yandex_notification(message):
-    token = 'y0_AgAAAAB2zmtUAATIlgAAAAEH9VmaAACr-yuiXKVEnqYiyoiGiI7SZhiamw'  # Токен
-    chat_id = '0/0/b06ba50c-e026-43fc-8603-69334b06da5d'  # ID чата
-
-    url = 'https://botapi.messenger.yandex.net/bot/v1/messages/sendText/'
-
+def _request(url, token, method="GET", **kwargs):
+     """Метод отправки запроса"""
     headers = {
         'Authorization': f'OAuth {token}',
         'Content-Type': 'application/json'
     }
+    response = requests.requests(url, method, headers=headers, **kwargs)
+
+    if response.status_code == 200:
+            app.logger.info("Уведомление успешно отправлено.")
+    else:
+        app.logger.error(f"Ошибка при отправке уведомления: {response.status_code} {response.text}")
+    return response.json()
+
+
+def send_yandex_notification(message):
+    token = ''  # Токен
+    url = f'{URL_YANDEX}bot/v1/chats/create/'
+    chat_id = '0/0/b06ba50c-e026-43fc-8603-69334b06da5d'  # ID чата
 
     data = {
         'chat_id': chat_id,
         'text': message
     }
 
-    response = requests.post(url, headers=headers, json=data)
-
-    if response.status_code == 200:
-        app.logger.info("Уведомление успешно отправлено.")
-    else:
-        app.logger.error(f"Ошибка при отправке уведомления: {response.status_code} {response.text}")
-
-    return response.json()
+    _request(url=url, token=token, method="POST, json=data)
 
 
 def create_yandex_notification(chanel_name):
-    token = 'y0_AgAAAAB2zmtUAATIlgAAAAEH9VmaAACr-yuiXKVEnqYiyoiGiI7SZhiamw'  # Токен
+    token = ''  # Токен
 
-    url = 'https://botapi.messenger.yandex.net/bot/v1/chats/create/'
+    url = f'{URL_YANDEX}bot/v1/messages/sendText/'
 
-    headers = {
-        'Authorization': f'OAuth {token}',
-        'Content-Type': 'application/json'
-    }
+    return _request(url=url, token=token, method="POST)
 
-    data = {
-        "name": chanel_name,
-        "description": "Тест канал",
-        "admins": [{"login": "v.onishchuk@centrofinans.ru"}]
-    }
 
-    response = requests.post(url, headers=headers, json=data)
-    return response.json()
 
 
 def check_certificates_and_send_notification():
