@@ -10,7 +10,7 @@ from lib.mongo import MongoDB, COLLECTION_CERTS, COLLECTION_USERS
 # Инициализация подключения к базе данных c тестом
 class TestMongo(unittest.TestCase):
     def setUp(self):
-        self.mongo = MongoDB('mongodb://localhost:27017/test_base')
+        self.mongo = MongoDB('mongodb://localhost:27017/certificates')
         self.mongo._connect()
 
     def tearDown(self):

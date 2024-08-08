@@ -3,7 +3,7 @@ import io
 import os
 import logging
 import atexit
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import requests
 import pandas as pd
@@ -11,15 +11,14 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from flask import (
     Flask,
     render_template,
-    request, redirect,
+    request,
+    redirect,
     url_for,
     flash,
     jsonify,
     send_file,
     make_response
 )
-from flask_login import LoginManager, login_user, logout_user, login_required
-from werkzeug.security import check_password_hash
 from flask_oidc import OpenIDConnect
 
 from lib.mongo import MongoDB
@@ -27,16 +26,33 @@ from lib.mongo import MongoDB
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key_here'
 
-# Настройка MongoDB
-mongo_url = 'mongodb://localhost:27017/certificates'
-mongo = MongoDB(mongo_url)
+# OpenID Connect configuration
+app.config.update({
+    'OIDC_CLIENT_SECRETS': {
+        'web': {
+            'issuer': 'https://oidc.dev.centrofinans.ru/auth/realms/master',
+            'auth_uri': 'https://oidc.dev.centrofinans.ru/auth/realms/master/protocol/openid-connect/auth',
+            'token_uri': 'https://oidc.dev.centrofinans.ru/auth/realms/master/protocol/openid-connect/token',
+            'userinfo_uri': 'https://oidc.dev.centrofinans.ru/auth/realms/master/protocol/openid-connect/userinfo',
+            'client_id': 'TimeCertificate',
+            'client_secret': os.getenv('keycloak_time_certificate', 'Ключа нет')
+        }
+    },
+    # 'OIDC_ID_TOKEN_COOKIE_SECURE': False,  # Set to True for HTTPS
+    # 'OIDC_OPENID_REALM': 'flask-oidc',
+    'OIDC_SCOPES': ['openid', 'profile', 'email'],
+    'MONGO_URI': 'mongodb://localhost:27017/certificates'
+})
 
-login_manager = LoginManager(app)
-login_manager.login_view = 'login'
+# Initialize OpenID Connect
+oidc = OpenIDConnect(app)
+
+# Initialize MongoDB
+mongo = MongoDB(app.config['MONGO_URI'])
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]',  # noqa
+    format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]',
     datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[
         logging.FileHandler("app.log"),
@@ -45,18 +61,12 @@ logging.basicConfig(
 )
 
 
-@login_manager.user_loader
-def load_user(email):
-    user = mongo.load_user(email)
-    if user:
-        return User(user['email'], user['password'], user['active'])
-    return None
-
-
-@login_manager.unauthorized_handler
-def unauthorized_callback():
-    flash('You must be logged in to view this page.', 'error')
-    return redirect(url_for('login'))
+# @login_manager.user_loader
+# def load_user(email):
+#     user = mongo.load_user(email)
+#     if user:
+#         return User(user['email'], user['password'], user['active'])
+#     return None
 
 
 class User:
@@ -147,12 +157,12 @@ def add_user(email, password):
 
 
 @app.route('/export_certificates')
-@login_required
+@oidc.require_login
 def export_certificates():
-    certificates = get_all_certificates()  # Используем MongoDB метод для получения сертификатов
+    certificates = get_all_certificates()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['ID', 'Name', 'Expiry Date'])  # заголовки CSV
+    writer.writerow(['ID', 'Name', 'Expiry Date'])
     for certificate in certificates:
         writer.writerow([certificate['_id'], certificate['hostname'], certificate['expiration_date']])
     response = make_response(output.getvalue())
@@ -173,7 +183,7 @@ def yandex_bot_webhook():
 
 
 @app.route('/update_certificate/<string:certificate_id>', methods=['POST'])
-@login_required
+@oidc.require_login
 def update_certificate(certificate_id):
     certificate = mongo.db[mongo.collection].find_one({"_id": certificate_id})
     if not certificate:
@@ -193,7 +203,7 @@ def update_certificate(certificate_id):
 
 
 @app.route('/test_notification', methods=['GET'])
-@login_required
+@oidc.require_login
 def test_notification():
     message = "Это тестовое сообщение от вашего бота."
     response = send_yandex_notification(message)
@@ -201,50 +211,44 @@ def test_notification():
 
 
 @app.route('/')
+# @oidc.require_login
 def index():
+    if not oidc.user_loggedin:
+        return redirect(url_for('login'))
     return render_template('index.html')
 
 
 @app.route('/view_certificates', methods=['GET'])
-@login_required
+@oidc.require_login
 def view_certificates():
     all_certs = get_all_certificates()
     return render_template('certificates.html', certificates=all_certs)
 
 
 @app.route('/view_expiring_certificates', methods=['GET'])
-@login_required
+@oidc.require_login
 def view_expiring_certificates():
     expiring_certificates = get_expiring_certificates_within_days(60)
     return render_template('expiring_certificates.html', certificates=expiring_certificates)
 
 
-@app.route('/login', methods=['GET', 'POST'])
+@app.route('/login')
+@oidc.require_login
 def login():
-    if request.method == 'POST':
-        email = request.form['email']
-        password = request.form['password']
-        user = mongo.load_user(email)
-        if user and check_password_hash(user['password'], password):
-            user_obj = User(user['email'], user['password'], user['active'])
-            login_user(user_obj)
-            flash('Logged in successfully.', 'success')
-            return redirect(url_for('index'))
-        else:
-            flash('Invalid email or password.', 'error')
-    return render_template('login2.0.html')
+    return redirect(url_for('index'))
 
 
 @app.route('/logout')
-@login_required
-def logout():
-    logout_user()
-    flash('Logged out successfully.', 'success')
-    return redirect(url_for('login'))
+# @oidc.require_login
+def oidc_logout():
+    ...
+    # print('!!!')
+    # oidc.logout()
+    # return redirect(url_for('certificates'))
 
 
 @app.route('/create_user', methods=['GET', 'POST'])
-@login_required
+@oidc.require_login
 def create_user():
     if request.method == 'POST':
         email = request.form['email']
@@ -256,7 +260,7 @@ def create_user():
 
 
 @app.route('/edit_certificate/<string:serial_number>', methods=['GET', 'POST'])
-@login_required
+@oidc.require_login
 def edit_certificate(serial_number):
     certificate = mongo.get_certificate(serial_number)
     if request.method == 'POST':
@@ -280,7 +284,7 @@ def edit_certificate(serial_number):
 
 
 @app.route('/delete_certificate/<string:serial_number>', methods=['POST'])
-@login_required
+@oidc.require_login
 def delete_certificate(serial_number):
     certificate = mongo.get_certificate(serial_number)
     if certificate:
@@ -292,7 +296,7 @@ def delete_certificate(serial_number):
 
 
 @app.route('/delete_user/<string:user_id>', methods=['POST'])
-@login_required
+@oidc.require_login
 def delete_user(user_id):
     mongo.delete_user(user_id)
     flash('User deleted successfully.', 'success')
@@ -300,7 +304,7 @@ def delete_user(user_id):
 
 
 @app.route('/download_certificates_csv', methods=['GET'])
-@login_required
+@oidc.require_login
 def download_certificates_csv():
     certificates = list(get_all_certificates())
     df = pd.DataFrame(certificates)
@@ -310,7 +314,7 @@ def download_certificates_csv():
 
 
 @app.route('/add_cert', methods=['POST'])
-@login_required
+@oidc.require_login
 def add_cert():
     hostname = request.form['hostname']
     common_name = request.form['common_name']
@@ -323,14 +327,12 @@ def add_cert():
     flash('Сертификат успешно добавлен.', 'success')
     return redirect(url_for('index'))
 
+
 # Запускаем планировщик задач
 scheduler = BackgroundScheduler()
 scheduler.add_job(check_certificates_and_send_notification, 'interval', days=1)
 scheduler.start()
 atexit.register(lambda: scheduler.shutdown())
-
-# Отправка уведомления сразу при запуске приложения
-# check_certificates_and_send_notification()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=80, debug=True)
