@@ -1,12 +1,8 @@
 import logging
 from datetime import datetime, timedelta
 from pymongo import MongoClient
-
 from werkzeug.security import generate_password_hash
-
-# mongo_url = 'mongodb://localhost:27017/certificates'
-# client = MongoClient(mongo_url)
-# db = client.get_database()
+from bson.objectid import ObjectId
 
 COLLECTION_CERTS = "certificates"
 COLLECTION_USERS = "users"
@@ -15,14 +11,12 @@ COLLECTION_USERS = "users"
 class MongoDB:
     def __init__(self, mongo_url: str):
         self.mongo_url = mongo_url
-
         self.connection = None
         self.db = None
-
         self.col_users = COLLECTION_USERS
         self.collection = COLLECTION_CERTS
-
         self.logging = logging.getLogger("MongoClient")
+        self._connect()
 
     def _connect(self):
         """Открываем соединение"""
@@ -34,12 +28,12 @@ class MongoDB:
         if self.connection is not None:
             self.connection.close()
 
-    def load_user(self, user_id):
-        """Загружает пользователя из базы"""
-        user = self.db[self.col_users].find_one({"user_id": user_id})
+    def load_user(self, email):
+        """Загружает пользователя из базы по email"""
+        user = self.db[self.col_users].find_one({"email": email})
         if user:
             return user
-        self.logging.warning(f"Пользователь с таким {user_id} не существует")
+        self.logging.warning(f"Пользователь с email {email} не существует")
         return None
 
     def add_certificate(self, hostname, common_name, expiration_date, serial_number):
@@ -56,7 +50,11 @@ class MongoDB:
 
     def get_all_certificates(self):
         """Возвращает все сертификаты из базы данных"""
-        return self.db[self.collection].find()
+        return list(self.db[self.collection].find())
+
+    def get_certificate(self, serial_number):
+        """Возвращает один сертификат из базы данных"""
+        return self.db[self.collection].find_one({"serial_number": serial_number})
 
     def get_expiring_certificates_within_days(self, days):
         """Возвращает сертификаты, срок действия которых истекает в течение указанных дней"""
@@ -83,10 +81,10 @@ class MongoDB:
             "serial_number": serial_number
         }
         self.db[self.collection].update_one(
-            {"_id": certificate_id},
+            {"_id": ObjectId(certificate_id)},
             {"$set": updated_data}
         )
-        self.logging.info(f"Обновление сертификата {certificate_id} для {hostname}")
+        self.logging.info(f"Updated certificate {certificate_id} for {hostname}")
 
     def delete_certificate(self, certificate_id):
         """Удаляет сертификат по ID"""
@@ -97,3 +95,5 @@ class MongoDB:
         """Удаляет пользователя по ID"""
         self.db[self.col_users].delete_one({"_id": user_id})
         logging.info(f"User {user_id} deleted successfully.")
+
+    # def view_certificates(self):

@@ -130,14 +130,24 @@ def add_user(email, password):
 @oidc.require_login
 def export_certificates():
     certificates = get_all_certificates()
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['ID', 'Name', 'Expiry Date'])
-    for certificate in certificates:
-        writer.writerow([certificate['_id'], certificate['hostname'], certificate['expiration_date']])
-    response = make_response(output.getvalue())
-    response.headers['Content-Disposition'] = 'attachment; filename=certificates.csv'
-    response.headers['Content-type'] = 'text/csv'
+    df = pd.DataFrame(certificates)
+    # Переименуйте столбцы, если необходимо
+    df = df.rename(columns={
+        '_id': 'ID',
+        'hostname': 'Name',
+        'expiration_date': 'Expiry Date'
+    })
+    df['Expiry Date'] = pd.to_datetime(df['Expiry Date']).dt.strftime('%d-%m-%Y')
+
+    # Создаем Excel-файл
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Certificates')
+    output.seek(0)
+
+    response = make_response(output.read())
+    response.headers['Content-Disposition'] = 'attachment; filename=certificates.xlsx'
+    response.headers['Content-type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     return response
 
 
