@@ -1,8 +1,10 @@
 import logging
+from bson.objectid import ObjectId
 from datetime import datetime, timedelta
+
 from pymongo import MongoClient
 from werkzeug.security import generate_password_hash
-from bson.objectid import ObjectId
+
 
 COLLECTION_CERTS = "certificates"
 COLLECTION_USERS = "users"
