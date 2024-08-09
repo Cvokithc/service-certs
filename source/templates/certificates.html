@@ -86,6 +86,24 @@
         .logout a:hover {
             background-color: #c0392b;
         }
+        .top-menu {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        .top-menu a {
+            text-decoration: none;
+            color: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #555; /* Тёмно-серый цвет для ссылок */
+            text-align: center;
+        }
+        .top-menu a:hover {
+            background-color: #2c2c2c; /* Тёмный цвет ссылки при наведении */
+        }
         .btn-container {
             display: flex; /* Используем flexbox для размещения кнопок в строку */
             gap: 10px; /* Расстояние между кнопками */
@@ -189,6 +207,11 @@
         </div>
         <div class="menu">
             <a href="{{ url_for('index') }}">Назад</a>
+        </div>
+        <div class="top-menu">
+            <a href="{{ url_for('view_certificates') }}">Просмотр всех сертификатов</a>
+            <a href="{{ url_for('view_expiring_certificates') }}">Просмотр истекающих через 60 дней</a>
+            <a href="{{ url_for('export_certificates') }}">Выгрузить сертификаты в Excel</a>
         </div>
     </div>
     <!-- Подключение jQuery и DataTables JS -->
