@@ -1,4 +1,3 @@
-import csv
 import io
 import os
 import logging
@@ -302,6 +301,9 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(check_certificates_and_send_notification, 'interval', days=1)
 scheduler.start()
 atexit.register(lambda: scheduler.shutdown())
+
+# Отправка уведомления сразу при запуске приложения
+check_certificates_and_send_notification()
 
 
 if __name__ == '__main__':
