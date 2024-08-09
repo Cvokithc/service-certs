@@ -35,12 +35,11 @@ app.config.update({
             'token_uri': 'https://oidc.dev.centrofinans.ru/auth/realms/master/protocol/openid-connect/token',
             'userinfo_uri': 'https://oidc.dev.centrofinans.ru/auth/realms/master/protocol/openid-connect/userinfo',
             'client_id': 'TimeCertificate',
-            'client_secret': os.getenv('keycloak_time_certificate', 'Ключа нет')
+            'client_secret': os.getenv('OIDC_CLIENT_SECRET'),
         }
     },
     # 'OIDC_ID_TOKEN_COOKIE_SECURE': False,  # Set to True for HTTPS
-    # 'OIDC_OPENID_REALM': 'flask-oidc',
-    'OIDC_SCOPES': ['openid', 'profile', 'email'],
+    'OIDC_SCOPES': ['openid'],
     'MONGO_URI': 'mongodb://localhost:27017/certificates'
 })
 
@@ -59,35 +58,6 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-
-
-# @login_manager.user_loader
-# def load_user(email):
-#     user = mongo.load_user(email)
-#     if user:
-#         return User(user['email'], user['password'], user['active'])
-#     return None
-
-
-class User:
-    def __init__(self, email, password, active):
-        self.email = email
-        self.password = password
-        self.active = active
-
-    @staticmethod
-    def is_authenticated():
-        return True
-
-    def is_active(self):
-        return self.active
-
-    @staticmethod
-    def is_anonymous():
-        return False
-
-    def get_id(self):
-        return self.email
 
 
 def add_certificate(hostname, common_name, expiration_date, serial_number):
@@ -211,11 +181,15 @@ def test_notification():
 
 
 @app.route('/')
-# @oidc.require_login
 def index():
     if not oidc.user_loggedin:
-        return redirect(url_for('login'))
+        return redirect(url_for('auth'))
     return render_template('index.html')
+
+
+@app.route('/auth')
+def auth():
+    return render_template('auth.html')
 
 
 @app.route('/view_certificates', methods=['GET'])
@@ -230,21 +204,6 @@ def view_certificates():
 def view_expiring_certificates():
     expiring_certificates = get_expiring_certificates_within_days(60)
     return render_template('expiring_certificates.html', certificates=expiring_certificates)
-
-
-@app.route('/login')
-@oidc.require_login
-def login():
-    return redirect(url_for('index'))
-
-
-@app.route('/logout')
-# @oidc.require_login
-def oidc_logout():
-    ...
-    # print('!!!')
-    # oidc.logout()
-    # return redirect(url_for('certificates'))
 
 
 @app.route('/create_user', methods=['GET', 'POST'])
@@ -333,6 +292,7 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(check_certificates_and_send_notification, 'interval', days=1)
 scheduler.start()
 atexit.register(lambda: scheduler.shutdown())
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=80, debug=True)
