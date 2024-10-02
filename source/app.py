@@ -16,7 +16,8 @@ from flask import (
     flash,
     jsonify,
     send_file,
-    make_response
+    make_response,
+    session
 )
 from flask_oidc import OpenIDConnect
 
@@ -59,6 +60,10 @@ logging.basicConfig(
 )
 
 
+def add_mchd_to_db(mchd_id, name, date):
+    mongo.add_mchd(mchd_id, name, date)
+
+
 def add_certificate(hostname, common_name, expiration_date, serial_number):
     mongo.add_certificate(hostname, common_name, expiration_date, serial_number)
 
@@ -98,6 +103,15 @@ def send_yandex_notification(message):
     return send_yandex_request('messages/sendText/', data)
 
 
+def send_mchd_notification(message):
+    chat_id = '0/0/b06ba50c-e026-43fc-8603-69334b06da5d'
+    data = {
+        'chat_id': chat_id,
+        'text': message
+    }
+    return send_yandex_request('messages/sendText/', data)
+
+
 def check_certificates_and_send_notification():
     certificates = get_expiring_certificates_within_days(60)
     if certificates:
@@ -113,6 +127,29 @@ def check_certificates_and_send_notification():
         send_yandex_notification("Нет сертификатов, истекающих в ближайшие 60 дней.")
 
 
+def check_mchd_and_send_notification():
+    mchd_list = mongo.get_expiring_mchd_within_days(60)
+    if mchd_list:
+        if not mchd_notification_already_sent_today():
+            messages = [
+                f"{mchd['name']} истекает {mchd['timestamp'].strftime('%d.%m.%Y')}"
+                for mchd in mchd_list
+            ]
+            full_message = "\n".join(messages)
+            send_mchd_notification(full_message)
+            mark_mchd_notification_as_sent_today()
+    else:
+        send_mchd_notification("Нет МЧД, истекающих в ближайшие 60 дней.")
+
+
+def mchd_notification_already_sent_today():
+    return False
+
+
+def mark_mchd_notification_as_sent_today():
+    pass
+
+
 def notification_already_sent_today():
     return False
 
@@ -125,12 +162,55 @@ def add_user(email, password):
     mongo.add_user(email, password)
 
 
+@app.route('/view_mchd', methods=['GET'])
+@oidc.require_login
+def view_mchd():
+    mchd_list = mongo.get_all_mchd()  # Предполагаем, что есть метод get_all_mchd() в MongoDB
+    return render_template('mchd.html', mchd_list=mchd_list)
+
+
+@app.route('/edit_mchd/<string:mchd_id>', methods=['GET', 'POST'])
+@oidc.require_login
+def edit_mchd(mchd_id):
+    # Получение текущих данных МЧД из базы данных
+    mchd = mongo.get_mchd(mchd_id)
+
+    if request.method == 'POST':
+        # Извлечение данных из формы
+        name = request.form.get('name')
+        value = request.form.get('value')  # Добавляем извлечение значения
+        date_str = request.form.get('date')
+
+        # Проверка, что все данные присутствуют
+        if not name or not value or not date_str:
+            flash('Пожалуйста, заполните все поля.', 'error')
+            return redirect(url_for('edit_mchd', mchd_id=mchd_id))
+
+        # Преобразование даты
+        date = datetime.strptime(date_str, '%Y-%m-%dT%H:%M')  # Корректный формат для datetime-local
+
+        # Обновление данных в базе данных
+        mongo.update_mchd(mchd_id, name, value, date)  # Убедитесь, что метод обновления принимает эти параметры
+        flash('МЧД обновлено успешно.', 'success')
+        return redirect(url_for('view_mchd'))
+
+    return render_template('edit_mchd.html', mchd=mchd)  # Передача данных в шаблон
+
+
+@app.route('/delete_mchd/<string:mchd_id>', methods=['POST'])
+@oidc.require_login
+def delete_mchd(mchd_id):
+    mongo.delete_mchd(mchd_id)  # Предполагаем, что есть метод delete_mchd() в MongoDB
+    flash('МЧД удалено успешно.', 'success')
+    return redirect(url_for('view_mchd'))
+
+
 @app.route('/export_certificates')
 @oidc.require_login
 def export_certificates():
     certificates = get_all_certificates()
     df = pd.DataFrame(certificates)
-    # Переименуйте столбцы, если необходимо
+    """Переименуйте столбцы, если необходимо"""
     df = df.rename(columns={
         '_id': 'ID',
         'hostname': 'Name',
@@ -138,7 +218,7 @@ def export_certificates():
     })
     df['Expiry Date'] = pd.to_datetime(df['Expiry Date']).dt.strftime('%d-%m-%Y')
 
-    # Создаем Excel-файл
+    """Создаем Excel-файл"""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Certificates')
@@ -199,6 +279,22 @@ def index():
 @app.route('/auth')
 def auth():
     return render_template('auth.html')
+
+
+@app.route('/logout')
+def logout():
+    """Очистка cookies"""
+    response = redirect(url_for('auth'))
+    response.set_cookie('session', '', expires=0)
+
+    """Очищаем сессию"""
+    session.clear()
+
+    """URL выхода из Keycloak"""
+    keycloak_logout_url = 'https://oidc.dev.centrofinans.ru/auth/realms/master/protocol/openid-connect/logout'
+
+    """Перенаправляем на Keycloak для завершения сессии там"""
+    return redirect(keycloak_logout_url + '?redirect_uri=' + url_for('auth', _external=True))
 
 
 @app.route('/view_certificates', methods=['GET'])
@@ -296,15 +392,30 @@ def add_cert():
     return redirect(url_for('index'))
 
 
+@app.route('/add_mchd', methods=['POST'])
+@oidc.require_login
+def add_mchd():
+    mchd_id = request.form['mchd_id']
+    name = request.form['name']
+    date_str = request.form['date']
+    date = datetime.strptime(date_str, '%Y-%m-%dT%H:%M')  # Обработка даты и времени
+
+    add_mchd_to_db(mchd_id, name, date)
+
+    flash('МЧД успешно добавлен.', 'success')
+    return redirect(url_for('view_mchd'))
+
+
 # Запускаем планировщик задач
 scheduler = BackgroundScheduler()
 scheduler.add_job(check_certificates_and_send_notification, 'interval', days=1)
+scheduler.add_job(check_mchd_and_send_notification, 'interval', days=1)
 scheduler.start()
 atexit.register(lambda: scheduler.shutdown())
 
 # Отправка уведомления сразу при запуске приложения
-check_certificates_and_send_notification()
-
+# check_certificates_and_send_notification()
+# check_mchd_and_send_notification()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=80, debug=True)

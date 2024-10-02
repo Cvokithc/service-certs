@@ -6,6 +6,7 @@ from bson.objectid import ObjectId
 
 COLLECTION_CERTS = "certificates"
 COLLECTION_USERS = "users"
+COLLECTION_MCHD = "mchd"
 
 
 class MongoDB:
@@ -15,6 +16,7 @@ class MongoDB:
         self.db = None
         self.col_users = COLLECTION_USERS
         self.collection = COLLECTION_CERTS
+        self.collection_mchd = COLLECTION_MCHD
         self.logging = logging.getLogger("MongoClient")
         self._connect()
 
@@ -97,3 +99,49 @@ class MongoDB:
         logging.info(f"User {user_id} deleted successfully.")
 
     # def view_certificates(self):
+
+    def add_mchd(self, name, value, timestamp):
+        """Добавление записи МЧД"""
+        mchd_record = {
+            "name": name,
+            "value": value,
+            "timestamp": timestamp
+        }
+        result = self.db[self.collection_mchd].insert_one(mchd_record)
+        self.logging.info(f"Added MCHD record {name} with value {value} at {timestamp}")
+        return result
+
+    def get_all_mchd(self):
+        """Возвращает все записи МЧД из базы данных"""
+        return list(self.db[self.collection_mchd].find())
+
+    def get_mchd(self, mchd_id):
+        """Возвращает одну запись МЧД из базы данных по ID"""
+        return self.db[self.collection_mchd].find_one({"_id": ObjectId(mchd_id)})
+
+    def update_mchd(self, mchd_id, name=None, value=None, timestamp=None):
+        """Обновляет запись МЧД по ID"""
+        updated_data = {}
+        if name is not None:
+            updated_data["name"] = name
+        if value is not None:
+            updated_data["value"] = value
+        if timestamp is not None:
+            updated_data["timestamp"] = timestamp
+
+        if updated_data:
+            self.db[self.collection_mchd].update_one(
+                {"_id": ObjectId(mchd_id)},
+                {"$set": updated_data}
+            )
+            self.logging.info(f"Updated MCHD record {mchd_id} with data {updated_data}")
+
+    def delete_mchd(self, mchd_id):
+        """Удаляет запись МЧД по ID"""
+        self.db[self.collection_mchd].delete_one({"_id": ObjectId(mchd_id)})
+        self.logging.info(f"Deleted MCHD record {mchd_id}")
+
+    def get_expiring_mchd_within_days(self, days):
+        """Возвращает МЧД, срок действия которых истекает в течение указанных дней"""
+        date_later = datetime.now() + timedelta(days=days)
+        return list(self.db[self.collection_mchd].find({"timestamp": {"$lte": date_later}}))
